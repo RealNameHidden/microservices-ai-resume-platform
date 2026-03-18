@@ -194,3 +194,24 @@ spec:
   selector:
     app: consul # Selector to match the Consul pods
   type: ClusterIP # Service type for internal cluster communication
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: employee-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: employee.local  # Replace with your desired hostname or use localhost in Minikube
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: employee-service
+                port:
+                  number: 8080
