@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: candidate # Deployment for the candidate-service
+  labels:
+    app: candidate
+spec:
+  replicas: 1 # Single replica — this service writes files to a shared volume, so scaling needs care
+  selector:
+    matchLabels:
+      app: candidate
+  template:
+    metadata:
+      labels:
+        app: candidate
+    spec:
+      containers:
+        - name: candidate-service
+          image: candidate-service:0.0.1-SNAPSHOT # Build with: docker build -t candidate-service:0.0.1-SNAPSHOT .
+          ports:
+            - containerPort: 8083
+              name: http
+              protocol: TCP
+          env:
+            # Consul — service discovery
+            - name: SPRING_CLOUD_CONSUL_HOST
+              value: "consul-server.default.svc.cluster.local"
+            - name: SPRING_CLOUD_CONSUL_PORT
+              value: "8500"
+            # MySQL — points to the mysql-service ClusterIP
+            - name: MYSQL_HOST
+              value: "mysql-service"
+            - name: MYSQL_USER
+              value: "root"
+            - name: MYSQL_PASSWORD
+              value: "password"
+            # Kafka — points to the kafka-service ClusterIP
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-service:9092"
+            # Resume upload directory — must match the volume mount path
+            - name: RESUME_UPLOAD_DIR
+              value: "/app/uploads"
+          volumeMounts:
+            - name: resume-uploads
+              mountPath: /app/uploads # PDFs saved here by CandidateService.saveFile()
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8083
+            initialDelaySeconds: 30 # Spring Boot takes time to start
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: resume-uploads
+          persistentVolumeClaim:
+            claimName: resume-uploads-pvc # Shared PVC — resume-parser reads from this same volume
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: candidate-service # Service name — used by other services and Consul
+spec:
+  selector:
+    app: candidate
+  ports:
+    - protocol: TCP
+      port: 8083
+      targetPort: 8083
+      nodePort: 30083 # Access from host via: $(minikube ip):30083
+  type: NodePort # Exposed externally — recruiters/users upload resumes through this

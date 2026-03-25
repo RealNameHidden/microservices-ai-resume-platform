@@ -22,3 +22,23 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Maven build output
+**/target/
+
+# Spring Boot
+*.log.*
+
+# Secrets — never commit API keys
+kube/claude-secret.yml
+
+# Logs
+logs.txt
