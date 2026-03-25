@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis # Deployment name for the Redis cache
+  labels:
+    app: redis
+spec:
+  replicas: 1 # Single Redis instance — sufficient for demo; use Redis Cluster in prod
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-alpine # Alpine variant — minimal image size (~30MB vs ~130MB full)
+          ports:
+            - containerPort: 6379 # Default Redis port
+              name: redis
+          command: ["redis-server"]
+          args:
+            - "--maxmemory"
+            - "256mb" # Cap memory — prevents Redis from swallowing all pod RAM
+            - "--maxmemory-policy"
+            - "allkeys-lru" # Evict least-recently-used keys when full (good for a cache)
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "300Mi"
+              cpu: "300m"
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"] # Redis responds "PONG" when healthy
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service # Service name — matches REDIS_HOST in application.properties
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+      name: redis
+  type: ClusterIP # Cache is internal only — never expose Redis externally

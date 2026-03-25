@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resume-parser # Deployment for the resume-parser service
+  labels:
+    app: resume-parser
+spec:
+  replicas: 1 # Single replica — consumes Kafka events sequentially
+  selector:
+    matchLabels:
+      app: resume-parser
+  template:
+    metadata:
+      labels:
+        app: resume-parser
+    spec:
+      containers:
+        - name: resume-parser
+          image: resume-parser:0.0.1-SNAPSHOT # Build with: docker build -t resume-parser:0.0.1-SNAPSHOT .
+          env:
+            # Consul — service discovery
+            - name: SPRING_CLOUD_CONSUL_HOST
+              value: "consul-server.default.svc.cluster.local"
+            - name: SPRING_CLOUD_CONSUL_PORT
+              value: "8500"
+            # MySQL — points to the mysql-service ClusterIP
+            - name: MYSQL_HOST
+              value: "mysql-service"
+            - name: MYSQL_USER
+              value: "root"
+            - name: MYSQL_PASSWORD
+              value: "password"
+            # Kafka — points to the kafka-service ClusterIP
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-service:9092"
+            # Elasticsearch — points to the elasticsearch-service ClusterIP
+            - name: ELASTICSEARCH_HOST
+              value: "elasticsearch-service"
+            # Claude API key — injected from Secret, never hardcoded
+            - name: CLAUDE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claude-secret   # matches metadata.name in claude-secret.yml
+                  key: CLAUDE_API_KEY
+          volumeMounts:
+            - name: resume-uploads
+              mountPath: /app/uploads # Reads PDFs saved by candidate-service
+              readOnly: true # Parser only reads — never writes to this volume
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8084
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: resume-uploads
+          persistentVolumeClaim:
+            claimName: resume-uploads-pvc # Same PVC as candidate-service — shared file access
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resume-parser-service # Service name — no external access needed
+spec:
+  selector:
+    app: resume-parser
+  ports:
+    - protocol: TCP
+      port: 8084
+      targetPort: 8084
+  type: ClusterIP # Internal only — this service has no REST API, it only consumes Kafka events

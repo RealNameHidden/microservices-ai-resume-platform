@@ -26,7 +26,7 @@ public class EmployeeService {
     public Employee getEmployeeById(int id) {
 
         Optional<EmployeeEntity> employee = employeeRepo.findById(id);
-        Employee employeeResponse = mapper.map(employee, Employee.class);
+        Employee employeeResponse = mapper.map(employee.orElseThrow(), Employee.class);
 
         // Using FeignClient
         ResponseEntity<Address> addressResponse = addressClient.getAddressByEmployeeId(id);

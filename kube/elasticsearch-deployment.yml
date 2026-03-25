@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch # Deployment name for the Elasticsearch node
+  labels:
+    app: elasticsearch
+spec:
+  replicas: 1 # Single node — sufficient for local Minikube demo
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+          ports:
+            - containerPort: 9200 # HTTP API port (queries, indexing)
+              name: http
+            - containerPort: 9300 # Inter-node transport port (not needed for single node, kept for completeness)
+              name: transport
+          env:
+            - name: discovery.type
+              value: "single-node" # Bypasses cluster formation — required for single-node local setup
+            - name: xpack.security.enabled
+              value: "false" # Disable auth for local dev — would be true in production
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m" # Constrain heap — Minikube has limited RAM
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "1.5Gi"
+              cpu: "1000m"
+          # Elasticsearch takes a while to boot — give it more time before probing
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health # ES built-in health endpoint
+              port: 9200
+            initialDelaySeconds: 60 # ES is slow to start
+            periodSeconds: 15
+            failureThreshold: 5
+          volumeMounts:
+            - name: es-data
+              mountPath: /usr/share/elasticsearch/data # Persist index data across pod restarts
+      volumes:
+        - name: es-data
+          emptyDir: {} # In-memory for demo — swap for a PVC in production
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-service # Service name — matches ELASTICSEARCH_HOST in application.properties
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - protocol: TCP
+      port: 9200 # HTTP API — used by search-service and resume-parser
+      targetPort: 9200
+      name: http
+    - protocol: TCP
+      port: 9300 # Transport (node-to-node)
+      targetPort: 9300
+      name: transport
+  type: ClusterIP # Internal only — ES should never be exposed to the internet
