@@ -59,45 +59,89 @@ A polyglot microservices platform built with Spring Boot, featuring an AI-powere
 
 ---
 
-## Data Flow
+## How It Works
 
-### Resume Upload → Parse → Index
+### Pipeline 1 — Resume Upload, Parse, and Index
 
-```
-POST /candidate-service/candidates/upload
-  { name, email, file: resume.pdf }
-          │
-          ▼
-  Save PDF to shared volume
-  Insert into MySQL (candidatedb)
-  Publish → Kafka: resume.uploaded
-          │
-          ▼  (async)
-  Resume Parser consumes event
-  Extracts text from PDF
-  Calls Claude API → ParsedCandidate
-    { name, location, skills[], yearsOfExperience, summary }
-          │
-          ▼
-  Index into Elasticsearch (candidates index)
+This is the ingestion side of the platform. A recruiter submits a resume PDF along with a candidate's name and email. Here is what happens step by step:
+
+**1. Candidate Service receives the upload**
+
+The recruiter hits `POST /candidate-service/candidates/upload` with a multipart form containing the name, email, and PDF file. The Candidate Service saves the PDF to a shared volume (so the Resume Parser can read it later), writes a record to MySQL with the candidate's metadata and the file path, and then publishes a `ResumeUploadedEvent` message to the `resume.uploaded` Kafka topic. The HTTP response returns the new candidate ID immediately — the rest of the pipeline happens asynchronously.
+
+**2. Kafka delivers the event to the Resume Parser**
+
+Kafka acts as the buffer between the two services. The Candidate Service does not wait for parsing to finish — it fires the event and moves on. This means upload is always fast regardless of how long Claude takes to process the PDF.
+
+**3. Resume Parser extracts and structures the resume**
+
+The Resume Parser is a Kafka consumer listening on `resume.uploaded`. When it receives an event it reads the PDF from the shared volume, extracts the raw text, and sends that text to the Claude API (claude-haiku) with a prompt asking it to return a structured JSON object:
+
+```json
+{
+  "name": "Jane Smith",
+  "location": "Toronto, ON",
+  "skills": ["Java", "Spring Boot", "Kubernetes", "PostgreSQL"],
+  "yearsOfExperience": 5,
+  "summary": "Backend engineer with 5 years of experience..."
+}
 ```
 
-### Natural Language Search
+Claude handles all the messy variation in resume formats — different layouts, different section names, inconsistent date formats — and returns a clean, consistent structure every time.
 
+**4. Parsed candidate is indexed into Elasticsearch**
+
+The structured data is written to the `candidates` index in Elasticsearch. From this point on the candidate is searchable. The entire parse-and-index step typically takes a few seconds end to end.
+
+---
+
+### Pipeline 2 — Natural Language Candidate Search
+
+This is the query side. A recruiter types a plain English description of who they are looking for and gets back matching candidates.
+
+**1. Search Service receives the query**
+
+The recruiter hits `POST /search-service/search` with a JSON body like:
+
+```json
+{ "query": "Java developer in Toronto with Kubernetes experience" }
 ```
-POST /search-service/search
-  { "query": "Java dev in Toronto with Kubernetes experience" }
-          │
-          ▼
-  Call Claude API → EsFilters
-    { skills: ["Java", "Kubernetes"], location: "Toronto", minExperience: 0 }
-          │
-          ├── Redis cache hit?  → return immediately (servedFromCache: true)
-          │
-          └── Cache miss → Elasticsearch bool query
-                              → cache result in Redis
-                              → return candidates
+
+**2. Redis cache check**
+
+Before doing any work, the Search Service hashes the query and checks Redis. If the same query has been run in the last 10 minutes the cached result is returned immediately with `servedFromCache: true`. This keeps repeated searches instant and reduces load on both Claude and Elasticsearch.
+
+**3. Claude translates the query into Elasticsearch filters**
+
+On a cache miss, the raw query string is sent to the Claude API. Claude is prompted to extract structured search intent from it and return a filter object:
+
+```json
+{
+  "skills": ["Java", "Kubernetes"],
+  "location": "Toronto",
+  "minExperience": 0
+}
 ```
+
+This means recruiters never have to learn a query language — they just describe what they want in plain English and Claude handles the translation.
+
+**4. Elasticsearch executes the query**
+
+The Search Service builds a bool query from Claude's filters — matching on skills (term queries), location (match query), and years of experience (range query) — and runs it against the `candidates` index. The results are a ranked list of matching candidate profiles.
+
+**5. Result is cached and returned**
+
+The result is stored in Redis with a 10-minute TTL, then returned to the recruiter. The response includes the original query, the filters Claude derived, whether the result came from cache, and the list of matching candidates.
+
+---
+
+### Why Kafka instead of a direct service call?
+
+The Candidate Service could have called the Resume Parser directly over HTTP instead of going through Kafka. The reason it does not is resilience and speed. PDF parsing with an LLM call can take several seconds. If the Resume Parser is slow or temporarily down, a direct HTTP call would either block the upload response or fail it entirely. With Kafka, the upload always succeeds immediately and the parsing happens in the background. The Resume Parser can also be scaled independently, restarted without losing events, and can replay messages if something goes wrong.
+
+### Why Claude instead of a regex or rule-based parser?
+
+Resumes have no standard format. One candidate writes "5 years exp", another writes "2018–2023", another lists skills in a table, another buries them in paragraph form. A rule-based parser would need hundreds of special cases and would still miss things. Claude reads the raw text the same way a human would and extracts the same fields reliably regardless of format.
 
 ---
 
