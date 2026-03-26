@@ -23,6 +23,9 @@ public class ClaudeParserService {
     @Value("${claude.model}")
     private String claudeModel;
 
+    @Value("${claude.api.key}")
+    private String claudeApiKey;
+
     private static final String SYSTEM_PROMPT =
             "You are a resume parser. Extract structured data from the resume text provided. " +
             "Return ONLY valid JSON with no extra text, no markdown fences, no explanation.";
@@ -40,6 +43,17 @@ public class ClaudeParserService {
 
     public ParsedCandidate extract(String resumeText) {
         log.info("Sending resume text to Claude for parsing ({} chars)", resumeText.length());
+
+        if ("not-set".equals(claudeApiKey) || "your-api-key-here".equals(claudeApiKey)) {
+            log.warn("No Claude API key set — returning mock parsed candidate");
+            ParsedCandidate mock = new ParsedCandidate();
+            mock.setName("Mock Candidate");
+            mock.setLocation("Remote");
+            mock.setSkills(List.of("Java", "Go", "Spring Boot", "Kafka", "Elasticsearch"));
+            mock.setYearsOfExperience(5);
+            mock.setSummary("Mock summary — set CLAUDE_API_KEY for real parsing");
+            return mock;
+        }
 
         String userMessage = String.format(USER_PROMPT_TEMPLATE, resumeText);
 
@@ -63,6 +77,9 @@ public class ClaudeParserService {
 
             JsonNode root = objectMapper.readTree(rawResponse);
             String jsonText = root.path("content").get(0).path("text").asText();
+
+            // Strip markdown code fences if Claude wraps the JSON anyway
+            jsonText = jsonText.replaceAll("(?s)^```[a-zA-Z]*\\s*", "").replaceAll("(?s)```\\s*$", "").trim();
 
             log.info("Claude parsed resume: {}", jsonText);
             return objectMapper.readValue(jsonText, ParsedCandidate.class);

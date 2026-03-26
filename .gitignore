@@ -39,6 +39,7 @@ replay_pid*
 
 # Secrets — never commit API keys
 kube/claude-secret.yml
+.env
 
 # Logs
 logs.txt
