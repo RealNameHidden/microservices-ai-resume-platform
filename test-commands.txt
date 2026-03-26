@@ -1,0 +1,45 @@
+# ============================================================
+# 1. UPLOAD A RESUME
+# ============================================================
+# Replace resume.pdf with an actual PDF file path
+
+curl -X POST http://localhost:8083/candidate-service/candidates/upload \
+  -F "name=John Doe" \
+  -F "email=john@example.com" \
+  -F "file=@/Users/8ball/Downloads/Resume - Java and Go.pdf"
+
+# Note the "id" in the response — you'll need it below
+
+
+# ============================================================
+# 2. CHECK IF KAFKA / RESUME-PARSER PROCESSED IT
+# ============================================================
+# No direct Kafka HTTP API — check these instead:
+
+# a) Check resume-parser health (confirm it's alive)
+curl http://localhost:8084/resume-parser/actuator/health
+
+# b) Check Elasticsearch directly for the indexed candidate
+#    (replace "John Doe" with the name you uploaded)
+curl "http://localhost:9200/candidates/_search?q=name:John+Doe&pretty"
+
+# c) Or check all indexed candidates
+curl "http://localhost:9200/candidates/_search?pretty"
+
+# d) View resume-parser logs to confirm processing
+docker logs geeksforgeeks-microservices-resume-parser-1 --tail=50 --follow
+
+
+# ============================================================
+# 3. SEARCH VIA SEARCH-SERVICE (natural language)
+# ============================================================
+
+curl -X POST http://localhost:8082/search-service/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Java developer with Kubernetes experience"}'
+
+# The response includes:
+# - originalQuery
+# - derivedFilters (skills/location/experience Claude extracted)
+# - servedFromCache (Redis hit/miss)
+# - candidates (matching results from Elasticsearch)

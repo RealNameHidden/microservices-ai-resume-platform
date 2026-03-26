@@ -1,157 +1,243 @@
+# microservices-ai-resume-platform
 
-# Microservices Demo Project
+A polyglot microservices platform built with Spring Boot, featuring an AI-powered resume ingestion pipeline and a natural language candidate search engine — all wired together with Kafka, Elasticsearch, Redis, and the Claude API.
 
-A Spring Boot microservices demo project featuring an Employee and Address service with an API Gateway, MySQL persistence, Docker containerization, and Kubernetes orchestration with Consul service discovery.
+---
 
 ## Architecture
 
 ```
-Client
-  └── API Gateway (port 8083)
-        ├── /employee-service/** → Employee Service (port 8080)
-        └── /address-service/**  → Address Service (port 8081)
-                                        └── Feign Client → Address Service
+                        ┌─────────────────────────────────────────────────────┐
+                        │                   Docker Compose                    │
+                        │                                                     │
+  Recruiter/Client      │                                                     │
+       │                │                                                     │
+       ▼                │                                                     │
+ ┌─────────────┐        │  ┌──────────────────┐     ┌──────────────────────┐ │
+ │ API Gateway │────────┼─▶│ Employee Service  │────▶│    Address Service   │ │
+ │  port 8083  │        │  │    port 8080      │     │      port 8081       │ │
+ └─────────────┘        │  └────────┬─────────┘     └──────────────────────┘ │
+                        │           │ MySQL                    │ MySQL        │
+       │                │           ▼                          ▼              │
+       │                │  ┌─────────────────────────────────────────────┐   │
+       │                │  │              MySQL  (port 3306)              │   │
+       │                │  └─────────────────────────────────────────────┘   │
+       │                │                                                     │
+       │  Resume Upload │  ┌──────────────────┐   Kafka: resume.uploaded     │
+       └────────────────┼─▶│ Candidate Service │──────────────────────────┐  │
+                        │  │    port 8083      │                           │  │
+                        │  └──────────────────┘                           ▼  │
+                        │          │ MySQL                    ┌──────────────┐│
+                        │          ▼                          │ Resume Parser││
+                        │  ┌──────────────┐                  │  port 8084   ││
+                        │  │  candidatedb │                  └──────┬───────┘│
+                        │  └──────────────┘                         │        │
+                        │                             Claude API    │        │
+                        │                             (parse PDF)   │        │
+                        │                                           ▼        │
+                        │  ┌────────────────────────────────────────────┐   │
+                        │  │           Elasticsearch  (port 9200)        │   │
+                        │  └────────────────────────────────────────────┘   │
+                        │                          ▲                         │
+                        │  ┌──────────────────┐    │ query                  │
+       NL Search ───────┼─▶│  Search Service  │────┘                        │
+                        │  │    port 8082     │──────────── Redis cache ─────│
+                        │  └──────────────────┘                              │
+                        │          │ Claude API (query → ES filters)         │
+                        └─────────────────────────────────────────────────────┘
 ```
 
-Both services connect to a shared MySQL database and register with Consul for service discovery in Kubernetes.
+---
 
 ## Services
 
-### Employee Service
-- Manages employee records (name, email, age)
-- Calls Address Service via Feign Client to enrich responses with address data
-- Port: `8080`, context path: `/employee-service`
+| Service | Port | What it does |
+|---|---|---|
+| **API Gateway** | 8083 | Single entry point — routes to employee and address services |
+| **Employee Service** | 8080 | CRUD for employee records; calls Address Service via Feign |
+| **Address Service** | 8081 | Manages addresses linked to employees |
+| **Candidate Service** | 8083 | Accepts resume uploads (PDF + metadata), fires a Kafka event |
+| **Resume Parser** | 8084 | Consumes Kafka events, extracts PDF text, calls Claude to parse structured data, indexes in Elasticsearch |
+| **Search Service** | 8082 | Accepts natural language queries, uses Claude to derive Elasticsearch filters, checks Redis cache, returns matching candidates |
 
-### Address Service
-- Manages address records (city, state) linked to employees via `employee_id`
-- Port: `8081`, context path: `/address-service`
-- Exposes Spring Boot Actuator health endpoints
+## Infrastructure
 
-### API Gateway
-- Single entry point for all traffic using Spring Cloud Gateway
-- Strips service-name prefix before forwarding requests
-- Port: `8083`
+| Component | Port | Role |
+|---|---|---|
+| MySQL | 3306 | Persistent store for employees, addresses, and candidate metadata |
+| Kafka | 9092 | Async event bus (`resume.uploaded` topic) |
+| Elasticsearch | 9200 | Full-text + filtered search index for parsed candidate profiles |
+| Kibana | 5601 | Elasticsearch UI for inspection and debugging |
+| Redis | 6379 | Search result cache (10-minute TTL) |
+| Consul | 8500 | Service discovery (Kubernetes only) |
+
+---
+
+## Data Flow
+
+### Resume Upload → Parse → Index
+
+```
+POST /candidate-service/candidates/upload
+  { name, email, file: resume.pdf }
+          │
+          ▼
+  Save PDF to shared volume
+  Insert into MySQL (candidatedb)
+  Publish → Kafka: resume.uploaded
+          │
+          ▼  (async)
+  Resume Parser consumes event
+  Extracts text from PDF
+  Calls Claude API → ParsedCandidate
+    { name, location, skills[], yearsOfExperience, summary }
+          │
+          ▼
+  Index into Elasticsearch (candidates index)
+```
+
+### Natural Language Search
+
+```
+POST /search-service/search
+  { "query": "Java dev in Toronto with Kubernetes experience" }
+          │
+          ▼
+  Call Claude API → EsFilters
+    { skills: ["Java", "Kubernetes"], location: "Toronto", minExperience: 0 }
+          │
+          ├── Redis cache hit?  → return immediately (servedFromCache: true)
+          │
+          └── Cache miss → Elasticsearch bool query
+                              → cache result in Redis
+                              → return candidates
+```
+
+---
 
 ## API Endpoints
 
+### Candidate Service (port 8083)
 | Method | Path | Description |
-|--------|------|-------------|
-| GET | `/employee-service/employees/{id}` | Get employee with enriched address |
-| GET | `/address-service/address/{employeeId}` | Get address by employee ID |
-| GET | `/employee-service/actuator/health` | Employee service health |
-| GET | `/address-service/actuator/health` | Address service health |
+|---|---|---|
+| `POST` | `/candidate-service/candidates/upload` | Upload a resume (multipart: `name`, `email`, `file`) |
+| `GET` | `/candidate-service/candidates/{id}` | Get candidate by ID |
 
-All routes are accessible through the API Gateway on port `8083`.
+### Search Service (port 8082)
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/search-service/search` | Natural language candidate search |
 
-## Tech Stack
+### Employee / Address (via API Gateway on port 8083)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/employee-service/employees/{id}` | Get employee with address |
+| `GET` | `/address-service/address/{employeeId}` | Get address by employee ID |
 
-| Layer | Technology |
-|-------|-----------|
-| Language | Java 17 |
-| Framework | Spring Boot 3.3.3 |
-| API Gateway | Spring Cloud Gateway |
-| Inter-service comms | Spring Cloud OpenFeign |
-| ORM | Spring Data JPA |
-| Database | MySQL 8 |
-| Service discovery | HashiCorp Consul |
-| Monitoring | Spring Boot Actuator |
-| Build | Maven 3 |
-| Containerization | Docker (multi-stage builds) |
-| Orchestration | Kubernetes |
-
-## Data Models
-
-**Employee**
-```json
-{
-  "id": 1,
-  "name": "John Doe",
-  "email": "john@example.com",
-  "age": "30",
-  "address": {
-    "id": 1,
-    "city": "New York",
-    "state": "NY"
-  }
-}
+### Health Checks
+```
+GET http://localhost:8083/candidate-service/actuator/health
+GET http://localhost:8084/resume-parser/actuator/health
+GET http://localhost:8082/search-service/actuator/health
 ```
 
-**Address**
-```json
-{
-  "id": 1,
-  "city": "New York",
-  "state": "NY"
-}
+---
+
+## Building and Running
+
+### Prerequisites
+
+- Docker + Docker Compose
+- An [Anthropic API key](https://console.anthropic.com)
+
+### 1. Set your API key
+
+Create a `.env` file in the project root:
+
+```
+CLAUDE_API_KEY=sk-ant-api03-...
 ```
 
-## Running Locally with Docker Compose
+### 2. Build and start everything
 
 ```bash
 docker-compose up --build
 ```
 
-This starts:
-- `mysql-docker-container` — MySQL 8 on port `3306`, database `gfgmicroservicesdemo`
-- `employee-service` — on port `8080`
-- `address-service` — on port `8081`
+This starts all services and infrastructure. First build will take a few minutes.
 
-Employee and Address services wait for MySQL to be healthy before starting.
+### 3. Test the full pipeline
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MYSQL_HOST` | `mysql-docker-container` | MySQL hostname |
-| `MYSQL_USERNAME` | `root` | MySQL user |
-| `MYSQL_PASSWORD` | `password` | MySQL password |
-
-## Deploying to Kubernetes
-
-All manifests are in the [kube/](kube/) directory.
-
+**Upload a resume:**
 ```bash
-kubectl apply -f kube/deployment-manifest-all.yml
+curl -X POST http://localhost:8083/candidate-service/candidates/upload \
+  -F "name=John Doe" \
+  -F "email=john@example.com" \
+  -F "file=@/path/to/resume.pdf"
 ```
 
-### What gets deployed
-
-| Resource | Type | Replicas | Details |
-|----------|------|----------|---------|
-| MySQL | StatefulSet | 1 | 10Gi PersistentVolume, ClusterIP service |
-| Employee Service | Deployment | 2 | NodePort 30080, liveness probe on `/actuator/health` |
-| Address Service | Deployment | 2 | ClusterIP, liveness probe on `/actuator/health` |
-| Consul | Deployment | 1 | Service discovery, HTTP on 8500, DNS on 8600 |
-| Ingress | Ingress | — | Host: `employee.local`, routes to Employee Service |
-
-Services connect to Consul via:
-- `SPRING_CLOUD_CONSUL_HOST=consul-server.default.svc.cluster.local`
-- `SPRING_CLOUD_CONSUL_PORT=8500`
-
-The Employee Service is exposed externally via NodePort on `30080`. Address Service is internal-only (ClusterIP).
-
-### Accessing via Ingress
-
-Add the following to `/etc/hosts`:
-```
-<node-ip>  employee.local
+**Check if it was parsed and indexed** (give it a few seconds for Kafka + Claude):
+```bash
+curl "http://localhost:9200/candidates/_search?pretty"
 ```
 
-Then access: `http://employee.local/employees/{id}`
+**Watch resume-parser logs:**
+```bash
+docker logs geeksforgeeks-microservices-resume-parser-1 --tail=50 --follow
+```
+
+**Search candidates with natural language:**
+```bash
+curl -X POST http://localhost:8082/search-service/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Java developer with Kubernetes experience"}'
+```
+
+---
 
 ## Project Structure
 
 ```
 .
-├── employee-service/          # Spring Boot employee management service
-│   ├── Dockerfile             # Multi-stage Docker build
-│   └── src/
-├── address-service/           # Spring Boot address management service
-│   ├── Dockerfile             # Multi-stage Docker build
-│   └── src/
-├── api-gateway/               # Spring Cloud Gateway
-│   └── src/
-├── kube/
-│   └── deployment-manifest-all.yml   # Full Kubernetes manifest
-└── docker-compose.yml         # Local development stack
+├── api-gateway/           # Spring Cloud Gateway
+├── employee-service/      # Employee CRUD service
+├── address-service/       # Address CRUD service
+├── candidate-service/     # Resume upload + Kafka producer
+├── resume-parser/         # Kafka consumer + Claude PDF parser + ES indexer
+├── search-service/        # Natural language search via Claude + Elasticsearch
+├── kube/                  # Kubernetes manifests
+├── docker-compose.yml     # Full local stack
+└── .env                   # API keys (not committed)
 ```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Java 17 |
+| Framework | Spring Boot 3.x |
+| API Gateway | Spring Cloud Gateway |
+| Inter-service (sync) | Spring Cloud OpenFeign |
+| Inter-service (async) | Apache Kafka 3.8 |
+| AI / LLM | Anthropic Claude (Haiku) |
+| Search | Elasticsearch 8.13 |
+| Cache | Redis 7 |
+| ORM | Spring Data JPA |
+| Database | MySQL 8 |
+| Service Discovery | HashiCorp Consul (Kubernetes) |
+| Observability | Spring Boot Actuator |
+| Build | Maven 3 |
+| Containers | Docker (multi-stage builds) |
+| Orchestration | Kubernetes |
+
+---
+
+## Deploying to Kubernetes
+
+```bash
+kubectl apply -f kube/deployment-manifest-all.yml
+```
+
+Services connect to Consul at `consul-server.default.svc.cluster.local:8500`. Add your Claude API key as a Kubernetes secret and reference it in the deployment manifests.
