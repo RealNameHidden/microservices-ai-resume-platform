@@ -20,7 +20,7 @@ spec:
               name: http
               protocol: TCP
           env:
-            # Consul — service discovery, same pattern as employee-service and address-service
+            # Consul — service discovery
             - name: SPRING_CLOUD_CONSUL_HOST
               value: "consul-server.default.svc.cluster.local"
             - name: SPRING_CLOUD_CONSUL_PORT
@@ -37,11 +37,13 @@ spec:
                 secretKeyRef:
                   name: claude-secret   # matches metadata.name in claude-secret.yml
                   key: CLAUDE_API_KEY
+            - name: SPRING_APPLICATION_NAME
+              value: "search-service"
           livenessProbe:
             httpGet:
               path: /search-service/actuator/health # Context path prefix is /search-service
               port: 8082
-            initialDelaySeconds: 5
+            initialDelaySeconds: 90
             periodSeconds: 10
 ---
 apiVersion: v1

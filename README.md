@@ -12,17 +12,6 @@ A polyglot microservices platform built with Spring Boot, featuring an AI-powere
                         │                                                     │
   Recruiter/Client      │                                                     │
        │                │                                                     │
-       ▼                │                                                     │
- ┌─────────────┐        │  ┌──────────────────┐     ┌──────────────────────┐ │
- │ API Gateway │────────┼─▶│ Employee Service  │────▶│    Address Service   │ │
- │  port 8083  │        │  │    port 8080      │     │      port 8081       │ │
- └─────────────┘        │  └────────┬─────────┘     └──────────────────────┘ │
-                        │           │ MySQL                    │ MySQL        │
-       │                │           ▼                          ▼              │
-       │                │  ┌─────────────────────────────────────────────┐   │
-       │                │  │              MySQL  (port 3306)              │   │
-       │                │  └─────────────────────────────────────────────┘   │
-       │                │                                                     │
        │  Resume Upload │  ┌──────────────────┐   Kafka: resume.uploaded     │
        └────────────────┼─▶│ Candidate Service │──────────────────────────┐  │
                         │  │    port 8083      │                           │  │
@@ -53,9 +42,6 @@ A polyglot microservices platform built with Spring Boot, featuring an AI-powere
 
 | Service | Port | What it does |
 |---|---|---|
-| **API Gateway** | 8083 | Single entry point — routes to employee and address services |
-| **Employee Service** | 8080 | CRUD for employee records; calls Address Service via Feign |
-| **Address Service** | 8081 | Manages addresses linked to employees |
 | **Candidate Service** | 8083 | Accepts resume uploads (PDF + metadata), fires a Kafka event |
 | **Resume Parser** | 8084 | Consumes Kafka events, extracts PDF text, calls Claude to parse structured data, indexes in Elasticsearch |
 | **Search Service** | 8082 | Accepts natural language queries, uses Claude to derive Elasticsearch filters, checks Redis cache, returns matching candidates |
@@ -128,12 +114,6 @@ POST /search-service/search
 |---|---|---|
 | `POST` | `/search-service/search` | Natural language candidate search |
 
-### Employee / Address (via API Gateway on port 8083)
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/employee-service/employees/{id}` | Get employee with address |
-| `GET` | `/address-service/address/{employeeId}` | Get address by employee ID |
-
 ### Health Checks
 ```
 GET http://localhost:8083/candidate-service/actuator/health
@@ -200,8 +180,6 @@ curl -X POST http://localhost:8082/search-service/search \
 ```
 .
 ├── api-gateway/           # Spring Cloud Gateway
-├── employee-service/      # Employee CRUD service
-├── address-service/       # Address CRUD service
 ├── candidate-service/     # Resume upload + Kafka producer
 ├── resume-parser/         # Kafka consumer + Claude PDF parser + ES indexer
 ├── search-service/        # Natural language search via Claude + Elasticsearch
