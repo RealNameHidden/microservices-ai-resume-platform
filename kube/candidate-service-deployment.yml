@@ -35,11 +35,13 @@ spec:
             - name: MYSQL_PASSWORD
               value: "password"
             # Kafka — points to the kafka-service ClusterIP
-            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+            - name: KAFKA_BOOTSTRAP_SERVERS
               value: "kafka-service:9092"
             # Resume upload directory — must match the volume mount path
             - name: RESUME_UPLOAD_DIR
               value: "/app/uploads"
+            - name: SPRING_APPLICATION_NAME
+              value: "candidate-service"
           volumeMounts:
             - name: resume-uploads
               mountPath: /app/uploads # PDFs saved here by CandidateService.saveFile()
@@ -47,7 +49,7 @@ spec:
             httpGet:
               path: /actuator/health
               port: 8083
-            initialDelaySeconds: 30 # Spring Boot takes time to start
+            initialDelaySeconds: 90
             periodSeconds: 10
           resources:
             requests:

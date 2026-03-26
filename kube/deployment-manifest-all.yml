@@ -47,99 +47,123 @@ spec:
       port: 3306 # Service port
       targetPort: 3306 # Port on the MySQL container
   type: ClusterIP # Service type for internal cluster communication
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: employee # Name of the Deployment for the employee service
-spec:
-  replicas: 2 # Number of replicas for high availability
-  selector:
-    matchLabels:
-      app: employee # Selector to identify the employee pods
-  template:
-    metadata:
-      labels:
-        app: employee # Label assigned to the employee pods
-    spec:
-      containers:
-        - name: employee-service # Name of the employee container
-          image: employee-service:2.0.1 # Image version for the employee service
-          ports:
-            - containerPort: 8080 # Port exposed by the employee service container
-              name: http # Name of the port
-              protocol: TCP # Protocol used
-          env:
-            - name: SPRING_CLOUD_CONSUL_HOST # Environment variable for Consul host
-              value: "consul-server.default.svc.cluster.local" # Consul service address in the cluster
-            - name: SPRING_CLOUD_CONSUL_PORT # Environment variable for Consul port
-              value: "8500"
-          livenessProbe: # Probe to check container health
-            httpGet:
-              path: /actuator/health # Path for health check endpoint
-              port: 8080 # Port for health check
-            initialDelaySeconds: 5 # Delay before starting the first probe
-            periodSeconds: 10 # Interval between probes
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: employee-service # Name of the Service for the employee service
-spec:
-  selector:
-    app: employee # Selector to match the employee pods
-  ports:
-    - protocol: TCP
-      port: 8080 # Service port
-      targetPort: 8080 # Port on the employee container
-      nodePort: 30080 # NodePort for external access
-  type: NodePort # Service type allowing external access via a specific node port
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: address # Name of the Deployment for the address service
-spec:
-  replicas: 2 # Number of replicas for high availability
-  selector:
-    matchLabels:
-      app: address # Selector to identify the address pods
-  template:
-    metadata:
-      labels:
-        app: address # Label assigned to the address pods
-    spec:
-      containers:
-        - name: address-service # Name of the address container
-          image: address-service:2.0 # Image version for the address service
-          ports:
-            - containerPort: 8081 # Port exposed by the address service container
-              name: http # Name of the port
-              protocol: TCP # Protocol used
-          env:
-            - name: SPRING_CLOUD_CONSUL_HOST # Environment variable for Consul host
-              value: "consul-server.default.svc.cluster.local" # Consul service address in the cluster
-            - name: SPRING_CLOUD_CONSUL_PORT # Environment variable for Consul port
-              value: "8500"
-          livenessProbe: # Probe to check container health
-            httpGet:
-              path: /actuator/health # Path for health check endpoint
-              port: 8081 # Port for health check
-            initialDelaySeconds: 5 # Delay before starting the first probe
-            periodSeconds: 10 # Interval between probes
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: address-service # Name of the Service for the address service
-spec:
-  selector:
-    app: address # Selector to match the address pods
-  ports:
-    - protocol: TCP
-      port: 8081 # Service port
-      targetPort: 8081 # Port on the address container
-  type: ClusterIP # Service type for internal cluster communication
+# ---
+# Employee and Address services are part of the project but not deployed to kube.
+# Build images first if you want to re-enable them:
+#   docker build -t employee-service:2.0.1 ./employee-service
+#   docker build -t address-service:2.0 ./address-service
+#
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: employee
+# spec:
+#   replicas: 2
+#   selector:
+#     matchLabels:
+#       app: employee
+#   template:
+#     metadata:
+#       labels:
+#         app: employee
+#     spec:
+#       containers:
+#         - name: employee-service
+#           image: employee-service:2.0.1
+#           ports:
+#             - containerPort: 8080
+#               name: http
+#               protocol: TCP
+#           env:
+#             - name: SPRING_CLOUD_CONSUL_HOST
+#               value: "consul-server.default.svc.cluster.local"
+#             - name: SPRING_CLOUD_CONSUL_PORT
+#               value: "8500"
+#           livenessProbe:
+#             httpGet:
+#               path: /actuator/health
+#               port: 8080
+#             initialDelaySeconds: 5
+#             periodSeconds: 10
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: employee-service
+# spec:
+#   selector:
+#     app: employee
+#   ports:
+#     - protocol: TCP
+#       port: 8080
+#       targetPort: 8080
+#       nodePort: 30080
+#   type: NodePort
+# ---
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: address
+# spec:
+#   replicas: 2
+#   selector:
+#     matchLabels:
+#       app: address
+#   template:
+#     metadata:
+#       labels:
+#         app: address
+#     spec:
+#       containers:
+#         - name: address-service
+#           image: address-service:2.0
+#           ports:
+#             - containerPort: 8081
+#               name: http
+#               protocol: TCP
+#           env:
+#             - name: SPRING_CLOUD_CONSUL_HOST
+#               value: "consul-server.default.svc.cluster.local"
+#             - name: SPRING_CLOUD_CONSUL_PORT
+#               value: "8500"
+#           livenessProbe:
+#             httpGet:
+#               path: /actuator/health
+#               port: 8081
+#             initialDelaySeconds: 5
+#             periodSeconds: 10
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: address-service
+# spec:
+#   selector:
+#     app: address
+#   ports:
+#     - protocol: TCP
+#       port: 8081
+#       targetPort: 8081
+#   type: ClusterIP
+# ---
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: employee-ingress
+#   annotations:
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+# spec:
+#   rules:
+#     - host: employee.local
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: employee-service
+#                 port:
+#                   number: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -195,23 +219,3 @@ spec:
     app: consul # Selector to match the Consul pods
   type: ClusterIP # Service type for internal cluster communication
 
----
-
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: employee-ingress
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
-  rules:
-    - host: employee.local  # Replace with your desired hostname or use localhost in Minikube
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: employee-service
-                port:
-                  number: 8080

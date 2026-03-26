@@ -31,7 +31,7 @@ spec:
             - name: MYSQL_PASSWORD
               value: "password"
             # Kafka — points to the kafka-service ClusterIP
-            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+            - name: KAFKA_BOOTSTRAP_SERVERS
               value: "kafka-service:9092"
             # Elasticsearch — points to the elasticsearch-service ClusterIP
             - name: ELASTICSEARCH_HOST
@@ -42,6 +42,8 @@ spec:
                 secretKeyRef:
                   name: claude-secret   # matches metadata.name in claude-secret.yml
                   key: CLAUDE_API_KEY
+            - name: SPRING_APPLICATION_NAME
+              value: "resume-parser"
           volumeMounts:
             - name: resume-uploads
               mountPath: /app/uploads # Reads PDFs saved by candidate-service
@@ -50,7 +52,7 @@ spec:
             httpGet:
               path: /actuator/health
               port: 8084
-            initialDelaySeconds: 30
+            initialDelaySeconds: 90
             periodSeconds: 10
           resources:
             requests:

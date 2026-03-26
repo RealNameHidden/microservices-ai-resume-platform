@@ -1,4 +1,72 @@
 # ============================================================
+# KUBERNETES (minikube) — HOW TO TEST
+# ============================================================
+#
+# STEP 1 — Open three terminal tabs and run one command in each:
+#
+#   Tab 1 (candidate-service):
+#     kubectl port-forward svc/candidate-service 8083:8083
+#
+#   Tab 2 (resume-parser health):
+#     kubectl port-forward svc/resume-parser-service 8084:8084
+#
+#   Tab 3 (search-service):
+#     kubectl port-forward svc/search-service 8082:8082
+#
+# Wait until each tab shows "Forwarding from 127.0.0.1:..." before continuing.
+#
+# STEP 2 — Health checks (run from a 4th tab)
+#
+#   curl http://localhost:8083/candidate-service/actuator/health
+#   curl http://localhost:8084/resume-parser/actuator/health
+#   curl http://localhost:8082/search-service/actuator/health
+#
+# All should return: {"status":"UP"}
+#
+# STEP 3 — Upload a resume
+#
+#   curl -X POST http://localhost:8083/candidate-service/candidates/upload \
+#     -F "name=John Doe" \
+#     -F "email=john@example.com" \
+#     -F "file=@/Users/8ball/Downloads/Resume - Java and Go.pdf"
+#
+# Note the "id" in the response.
+#
+# STEP 4 — Watch resume-parser process it (give it ~10s after upload)
+#
+#   kubectl logs -l app=resume-parser --follow
+#
+# You should see it consume the Kafka event, call Claude, and index into ES.
+#
+# STEP 5 — Check Elasticsearch directly (port-forward ES first)
+#
+#   kubectl port-forward svc/elasticsearch-service 9200:9200
+#
+#   curl "http://localhost:9200/candidates/_search?pretty"
+#
+# STEP 6 — Natural language search
+#
+#   curl -X POST http://localhost:8082/search-service/search \
+#     -H "Content-Type: application/json" \
+#     -d '{"query": "Java developer with Kubernetes experience"}'
+#
+# The response includes derivedFilters (what Claude extracted), servedFromCache,
+# and the matching candidates from Elasticsearch.
+#
+# USEFUL DEBUG COMMANDS
+#
+#   kubectl get pods                        # check all pod states
+#   kubectl describe pod <pod-name>         # diagnose ImagePullBackOff / CrashLoop
+#   kubectl logs -l app=resume-parser       # parser logs
+#   kubectl logs -l app=candidate           # candidate-service logs
+#   kubectl logs -l app=search              # search-service logs
+#   kubectl exec -it <pod> -- /bin/sh       # shell into a container
+
+# ============================================================
+# DOCKER COMPOSE
+# ============================================================
+
+# ============================================================
 # 1. UPLOAD A RESUME
 # ============================================================
 # Replace resume.pdf with an actual PDF file path
